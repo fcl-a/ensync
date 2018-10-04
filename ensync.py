@@ -1,4 +1,5 @@
 import os, sys
+import io
 import codecs
 import base64
 import re
@@ -20,7 +21,22 @@ from evernote.edam.limits.constants import EDAM_USER_NOTES_MAX
 
 import geeknote.config
 geeknote.config.APP_DIR = os.path.abspath('.') +"/.geeknote"
+if not os.path.isdir(geeknote.config.APP_DIR):
+    os.path.mkdir(geeknote.config.APP_DIR)
+
+if os.path.isfile("dev_token.txt"):
+    f = open("dev_token.txt")
+    dev_token = f.readline()
+    os.environ['EVERNOTE_DEV_TOKEN'] = dev_token
+    print (os.environ.get('EVERNOTE_DEV_TOKEN'))
+else:
+    print("no dev_token found")
+
 from geeknote.geeknote import GeekNote
+# print("Token:{}".format(GeekNote().authToken)) 
+if not GeekNote().authToken:
+    print ("not login")
+    exit()
 
 profile_path = '.ensync'
 if not os.path.isdir('.ensync'):os.mkdir(profile_path)
@@ -43,12 +59,12 @@ user_info = GeekNote().getUserInfo()
 os_encoding = locale.getpreferredencoding()
 
 remote_tag_list = GeekNote().findTags()
-remote_tag_dict = {tag.guid:tag.name for tag in remote_tag_list}
+remote_tag_dict = {tag.guid:tag.name.decode("utf-8") for tag in remote_tag_list}
 
 remote_notebooks = [notebook for notebook in GeekNote().findNotebooks()]
-notebook_names = {notebook.guid:notebook.name for notebook in remote_notebooks}
-notebook_guids = {notebook.name:notebook.guid for notebook in remote_notebooks}
-
+notebook_names = {notebook.guid.decode("utf-8"):notebook.name.decode("utf-8") for notebook in remote_notebooks}
+notebook_guids = {notebook.name.decode("utf-8"):notebook.guid.decode("utf-8") for notebook in remote_notebooks}
+#print(notebook_names)
 account_info = {"site":geeknote.config.USER_BASE_URL, "user_name":user_info.name.decode("utf-8"), "id":user_info.id}
 
 local_folders = {}#{"folder1":{'id1':'name1','id2':'name2'},"folder2":{'id3':"name3",'id4':"name4"}}
@@ -61,10 +77,10 @@ if (os.path.isfile(notebook_json_path)):
 def update_stored_notebooks():
     for folder, nbs in local_folders.items():
         for guid, name in nbs.items():
-            stored_notebooks[guid] = {"folder":folder,"notebook":name}
+            stored_notebooks[guid] = {u"folder":folder,u"notebook":name}
             
 update_stored_notebooks()
-
+# print( stored_notebooks)
 class StorageJson (object):
     def __init__(self, path):
         self.path = path
@@ -81,45 +97,58 @@ class StorageJson (object):
                 self.id_dict[guid] = {"local":local_name,"remote":name}    
     def sync_with_remote(self, remote_obj_list):
         for remote_obj in remote_obj_list:
-            if remote_obj.guid not in self.id_dict:
-                if remote_obj.name not in self._json:
-                    self._json[remote_obj.name] = {remote_obj.guid:remote_obj.name}
+            rm_id = remote_obj.guid.decode('utf8')
+            rm_name = remote_obj.name.decode('utf8')
+            if rm_id not in self.id_dict:
+                if rm_name not in self._json:
+                    self._json[rm_name] = {rm_id:rm_name}
             else:
-                local_obj = self.id_dict[remote_obj.guid]
-                if remote_obj.name != local_obj["remote"] and local_obj["local"] == local_obj["remote"]:
+                local_obj = self.id_dict[rm_id]
+                if rm_name != local_obj["remote"] and local_obj["local"] == local_obj["remote"]:
                     old_name = local_obj["local"]
-                    self._json[old_name][remote_obj.guid] = remote_obj.name
-                    self._json[remote_obj.name] = self._json.pop(old_name)
+                    self._json[old_name][rm_id] = rm_name
+                    self._json[rm_name] = self._json.pop(old_name)
         self._update_id_dict()
-        json.dump(self._json,open(self.path,"w+"), indent=4)
+        with io.open(notebook_json_path, 'w', encoding='utf8') as json_file:
+            data = json.dumps(self._json, ensure_ascii=False, indent=4)
+            json_file.write(unicode(data))
+        # json.dump(self._json,open(self.path,"w+"), indent=4,ensure_ascii=False, encoding='utf-8')
                     
     
 tag_json = StorageJson(os.path.join(profile_path, "tag.json"))
 tag_json.sync_with_remote(remote_tag_list)
-print tag_json._json        
+# print tag_json._json        
 # print json.dumps(local_folders, indent=4)             
 # print json.dumps(stored_notebooks, indent=4)     
  
 for nb in remote_notebooks:
+    nb_name = nb.name.decode('utf-8')
     if nb.guid not in stored_notebooks:
-        if nb.name not in local_folders:
+        if nb_name not in local_folders:
             #add new folder
-            local_folders[nb.name] = {nb.guid:nb.name}
+            local_folders[nb_name] = {nb.guid.decode('utf-8'):nb_name}
     else:
         local_nb = stored_notebooks[nb.guid]
-        if nb.name != local_nb["notebook"] and local_nb["folder"] == local_nb["notebook"]:
+        # print(local_nb["folder"])
+        # print(local_nb["notebook"])
+        #print(nb_name,local_nb["folder"],local_nb["notebook"])
+        if nb_name != local_nb["notebook"] and local_nb["folder"] == local_nb["notebook"]:
             #notebook name is updated in server
             old_name = local_nb["notebook"]
-            print ("notebook {} rename to {}".format(old_name, nb.name))
-            local_folders[old_name][nb.guid] = nb.name
-            local_folders[nb.name] = local_folders.pop(old_name)
-            os.rename(old_name, nb.name)
+            print ("notebook {} rename to {}".format(old_name, nb_name))
+            local_folders[old_name][nb.guid] = nb_name
+            local_folders[nb_name] = local_folders.pop(old_name)
+            os.rename(old_name, nb_name)
     
 update_stored_notebooks()  
 # print json.dumps(local_folders, indent=4)             
 # print json.dumps(stored_notebooks, indent=4)       
-
-json.dump(local_folders,open(notebook_json_path,"w+"), indent=4)
+# print local_folders
+#json.dump(local_folders,open(notebook_json_path,'w'), indent=4, ensure_ascii=False,encoding='utf-8')
+with io.open(notebook_json_path, 'w', encoding='utf8') as json_file:
+    data = json.dumps(local_folders, ensure_ascii=False,indent=4)
+    json_file.write(unicode(data))
+    # json.dump(local_folders, json_file, ensure_ascii=False)
 #sys.exit()
 
 def log(func):
@@ -217,7 +246,7 @@ def remote_note_to_et(note_meta):
     
     if note_obj.tagGuids is not None:
         for tag_id in note_obj.tagGuids:
-            SubElement(note_elm, 'tag').text = escape(remote_tag_dict[tag_id].decode('utf-8'))#.replace('&', '&amp;')
+            SubElement(note_elm, 'tag').text = escape(remote_tag_dict[tag_id])#.replace('&', '&amp;')
             
     note_attr_elm = SubElement(note_elm, 'note-attributes')
 
@@ -232,7 +261,7 @@ def remote_note_to_et(note_meta):
         if attr != None:
             attr_name = _conv_export_name(attr_name)
             if isinstance(attr, basestring):
-                SubElement(note_attr_elm, attr_name).text = escape(attr.decode("utf-8"))#.replace('&', '&amp;')
+                SubElement(note_attr_elm, attr_name).text = escape(attr.decode("utf-8"))
             if isinstance(attr, long):
                 if ('time' in attr_name or 'date' in attr_name):
                     SubElement(note_attr_elm, attr_name).text = strftime("%Y%m%dT%H%M%SZ", gmtime(attr / 1000))
@@ -264,6 +293,7 @@ def remote_note_to_et(note_meta):
                     SubElement(res_attr_elm, attr_name).text = strftime("%Y%m%dT%H%M%SZ", gmtime(attr / 1000))
                 if isinstance(attr, (float, bool)):
                     SubElement(res_attr_elm, attr_name).text = str(attr)
+    print ("Handle " + note_obj.notebookGuid)
     notebook_name = escape(notebook_names[note_obj.notebookGuid])
     server_elm = SubElement(export_elm, 'server_info')
     account_elm = SubElement(server_elm, 'account')
@@ -276,7 +306,7 @@ def remote_note_to_et(note_meta):
     SubElement(account_elm, "last_update").text = str(note_meta.updated)
     if note_obj.tagGuids is not None:
         for tag_id in note_obj.tagGuids:
-            SubElement(account_elm, 'tag',attrib={'id':tag_id}).text = escape(remote_tag_dict[tag_id].decode('utf-8'))#.replace('&', '&amp;')f
+            SubElement(account_elm, 'tag',attrib={'id':tag_id}).text = escape(remote_tag_dict[tag_id])#.replace('&', '&amp;')f
     return export_elm
 
 def elm_to_file( export_elm ):
@@ -299,8 +329,8 @@ def elm_to_file( export_elm ):
     logger.info("Export note: " + export_path)
     return export_path
     
-if __name__ == "__main__":
-    
+
+def main():
     logger.info("Start ensync in: {}".format(os.path.abspath('.')))
     logger.info('Account info: site:{}, account:{}, id:{}'.format(geeknote.config.USER_BASE_URL, user_info.name.decode("utf-8"), user_info.id))
     gn = GeekNote()
@@ -341,3 +371,5 @@ if __name__ == "__main__":
             elm_to_file(root)
     # remote_notebooks = [notebook.name for notebook in gn.findNotebooks()]
     # print remote_notebooks
+if __name__ == "__main__":
+    main()
