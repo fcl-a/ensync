@@ -145,9 +145,9 @@ update_stored_notebooks()
 # print json.dumps(stored_notebooks, indent=4)       
 # print local_folders
 #json.dump(local_folders,open(notebook_json_path,'w'), indent=4, ensure_ascii=False,encoding='utf-8')
-with io.open(notebook_json_path, 'w', encoding='utf8') as json_file:
-    data = json.dumps(local_folders, ensure_ascii=False,indent=4)
-    json_file.write(unicode(data))
+with io.open(notebook_json_path, 'wb') as json_file:
+    # data = json.dumps(local_folders, ensure_ascii=False,indent=4)
+    json_file.write(json.dumps(local_folders, ensure_ascii=False,indent=4).encode('utf8'))
     # json.dump(local_folders, json_file, ensure_ascii=False)
 #sys.exit()
 
@@ -240,7 +240,7 @@ def remote_note_to_et(note_meta):
     title_elm = SubElement(note_elm, 'title')
     title_elm.text = escape(note_meta.title.decode('utf-8'))#.replace('&', '&amp;')
     content_elm = SubElement(note_elm, "content")
-    content_elm.text = ET.CDATA(note_obj.content.decode('utf-8'))
+    content_elm.text = ET.CDATA(escape(note_obj.content.decode('utf-8')))
     SubElement(note_elm, 'created').text = strftime("%Y%m%dT%H%M%SZ", gmtime(note_meta.created / 1000))
     SubElement(note_elm, 'updated').text = strftime("%Y%m%dT%H%M%SZ", gmtime(note_meta.updated / 1000))
     
@@ -254,8 +254,8 @@ def remote_note_to_et(note_meta):
     first_cap_re = re.compile('(.)([A-Z][a-z]+)')
     all_cap_re = re.compile('([a-z0-9])([A-Z])')
     def _conv_export_name(name):
-        s1 = first_cap_re.sub(r'\1_\2', name)
-        return all_cap_re.sub(r'\1_\2', s1).lower()
+        s1 = first_cap_re.sub(r'\1-\2', name)
+        return all_cap_re.sub(r'\1-\2', s1).lower()
                 
     for attr_name, attr in note_meta.attributes.__dict__.items():
         if attr != None:
@@ -277,9 +277,9 @@ def remote_note_to_et(note_meta):
             # print ("found resource with size {} in {} ".format(res.data.size, print_title))
             SubElement(res_elm, 'data', encoding="base64").text = str(base64.b64encode(res.data.body))
             SubElement(res_elm, 'mime').text = res.mime
-            if res.width != None: SubElement(res_elm, 'width').text = str(res.width)                 
-            if res.height != None:SubElement(res_elm, 'height').text = str(res.height)
-            if res.recognition != None:SubElement(res_elm, 'recognition').text = ET.CDATA(res.recognition.body.decode("utf-8")) 
+            if res.width != None: SubElement(res_elm, 'width').text = str(res.width)#;print(res.width)                 
+            if res.height != None:SubElement(res_elm, 'height').text = str(res.height)#;print(res.height)    
+            if res.recognition != None:SubElement(res_elm, 'recognition').text = ET.CDATA(res.recognition.body.decode("utf-8"))#;print(res.recognition.body) 
             res_attr_elm = SubElement(res_elm, 'resource-attributes')
                                
             for attr_name, attr in res.attributes.__dict__.items():
@@ -289,10 +289,12 @@ def remote_note_to_et(note_meta):
                 if isinstance(attr, basestring):
                     attr = attr.decode("utf-8")
                     SubElement(res_attr_elm, attr_name).text = escape(attr)#.replace('&', '&amp;')
-                if ('time' in attr_name or 'date' in attr_name):
+                elif ('time' in attr_name or 'date' in attr_name):
                     SubElement(res_attr_elm, attr_name).text = strftime("%Y%m%dT%H%M%SZ", gmtime(attr / 1000))
-                if isinstance(attr, (float, bool)):
+                elif isinstance(attr, (float, bool)):
                     SubElement(res_attr_elm, attr_name).text = str(attr)
+                else:
+                    logger.info('res_attr_elm not save',attr_name, attr)
     print ("Handle " + note_obj.notebookGuid)
     notebook_name = escape(notebook_names[note_obj.notebookGuid])
     server_elm = SubElement(export_elm, 'server_info')
